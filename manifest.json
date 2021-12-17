@@ -1,0 +1,51 @@
+{
+    "name": "Handy TwoSeven Extension",
+    "version": "0.1",
+    "manifest_version": 2,
+    "permissions": [
+		"storage",
+		"unlimitedStorage",
+		"webRequest",
+		"*://twoseven.xyz/*",
+		"*://*/*" 
+    ],
+    "browser_action": {
+        "default_popup": "popup.html",
+        "default_title": "theHandy TwoSeven"
+    },
+    "background": {
+        "scripts": [
+            "background.js"
+        ],
+		"matches": [ "*://*/*" ]
+
+    },
+	"externally_connectable": {
+		"matches": [
+		  "*://twoseven.xyz/*"
+		],
+		"accepts_tls_channel_id": false
+	},
+	"content_scripts": [{
+		"matches": ["*://twoseven.xyz/*"],
+		"js": [
+			"jquery.js",
+			"content.js"
+		]
+	}],
+	"web_accessible_resources": [
+		"*://*/*" ,
+		"overlay.html",
+		"jquery.js",
+		"ion.rangeSlider.js",
+		"ion.rangeSlider.css",
+		"styles.css",
+		"patterns.csv"
+	],
+	"icons": { 
+		"16": "icon16.png",
+        "48": "icon48.png",
+        "128": "icon128.png" 
+	}
+}
+

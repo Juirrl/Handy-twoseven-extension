@@ -1,0 +1,98 @@
+#popupBody {
+    width: 650px;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 13px;
+}
+
+#popupBody input {
+    font-family: inherit;
+}
+
+#popupBody button {
+    font-family: inherit;
+}
+
+#popupBody select {
+    font-family: inherit;
+}
+
+#popupBody textarea {
+    font-family: inherit;
+}
+
+#popupBody #saveConnectionKeyButton {
+    display: inline-block;
+}
+
+#popupBody #startButton {
+    text-align: center;
+    display: block;
+}
+
+#popupBody div {
+    margin-bottom: 8px;
+    display: flex;
+}
+
+#popupBody #statusText {
+    width: 50%;
+}
+
+#popupBody #randomizerTimeBetweenSelector {
+    width: 50px;
+}
+
+#popupBody #patternNameTextField {
+    width: 100%;
+}
+
+#popupBody #patternTextField {
+    resize: vertical;
+    width: 100%;
+    height: 100px;
+    min-height: 35px;
+    max-height: 160px;
+}
+
+#popupBody hr {
+    margin-top: 20px;
+    margin-bottom: 20px; 
+}
+
+#container {
+	height: 100%; 
+	width:100%; 
+}
+
+/* DivTable.com */
+#popupBody .divTable{
+	display: table;
+	border: 0;
+	width: 100%;
+}
+#popupBody  .divTableRow {
+	display: table-row;
+}
+#popupBody  .divTableHeading {
+	background-color: #EEE;
+	display: table-header-group;
+}
+#popupBody  .divTableCell, .divTableHead {
+	border: 1px solid #999999;
+	display: table-cell;
+	padding: 3px 10px;
+	width: 300px;
+}
+#popupBody  .divTableHeading {
+	background-color: #EEE;
+	display: table-header-group;
+	font-weight: bold;
+}
+#popupBody  .divTableFoot {
+	background-color: #EEE;
+	display: table-footer-group;
+	font-weight: bold;
+}
+#popupBody  .divTableBody {
+	display: table-row-group;
+}
