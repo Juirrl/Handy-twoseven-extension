@@ -6,6 +6,13 @@ class Background {
 		window.xhrRequests = [];
 		var self = this;
 		window.self = this;
+		
+		window.masterStroke = {
+			start: 0,
+			stop: 100
+		};
+		
+		window.syncOffset = 0;
 
 		window.backgroundStatus = {
 			connectionKey: undefined,
@@ -13,6 +20,8 @@ class Background {
 			handyConnected: false,
 			contentScriptCount: 0,
 			paused: false,
+			scriptFileStatus: "",
+			loadFileStatus: "Select load when ready",
 			mode: -1, // These are the theoretical things the machine should be doing
 			levelEntry: -1,
 			level: -1,
@@ -66,10 +75,13 @@ class Background {
 				window.self.syncPrepare();
 			}
 			if ( message.includes('contentScriptInitialized' ) ) {
-				window.self.updateStatus(1);
+				window.self.updateContentScriptCount(1);
 			}  
 			if ( message.includes('contentScriptUnloaded' ) ) {
-				window.self.updateStatus(-1);
+				window.self.updateContentScriptCount(-1);
+			}  
+			if ( message.includes('updatePopupRequest' ) ) {
+				window.self.updatePopup();
 			}  
 		});
 		
@@ -83,17 +95,27 @@ class Background {
 		);
 		
 		chrome.storage.sync.get(['masterStroke'], function(result) {
-			if ( !chrome.runtime.error && result != null && result.levelMatrix != undefined) {
+			if ( !chrome.runtime.error && result != null && result.masterStroke != undefined ) {
 				window.masterStroke = result.masterStroke;	
 			} else {
-				window.masterStroke = window.self.getDefaultMasterStroke();
-				chrome.storage.sync.set( { 'masterStroke': window.masterStroke } );
+				chrome.storage.sync.set( { 'masterStroke': { start: window.masterStroke.start, stop: window.masterStroke.stop } } );
+			}
+		});	
+		
+		chrome.storage.sync.get(['syncOffset'], function(result) {
+			if ( !chrome.runtime.error && result != null && result.syncOffset != undefined ) {
+				window.syncOffset = result.syncOffset;	
+			} else {
+				chrome.storage.sync.set( { 'syncOffset': window.syncOffset } );
 			}
 		});	
 		
 		chrome.storage.onChanged.addListener(function(changes, namespace) {
 			for (let [key, { oldValue, newValue }] of Object.entries(changes)) {
-				if(key === 'masterStroke') window.masterStroke = newValue;
+				if(key === 'masterStroke') {
+					window.masterStroke = newValue;
+					window.self.handySetSlide(window.masterStroke.start, window.masterStroke.stop);
+				}
 				if(key === 'connectionKey') {
 					window.backgroundStatus.connectionKey = newValue;
 					window.self.checkConnected();
@@ -104,12 +126,10 @@ class Background {
 			}
 		});
 		
-		setInterval( window.self.checkConnected, 1500);
     }
 	
 	videoShareMessage(message) {
 		if ( message == undefined || message.length < 5) return;
-		console.log('Video message ' + message[3]);
 		if ( message[3] === 'play:') window.self.doVideoPlay(message[4]);
 		if ( message[3] === 'pause:') window.self.doVideoPause(message[4]);
 		if ( message[3] === 'seek:') window.self.doVideoSeek(message[4]);
@@ -118,8 +138,7 @@ class Background {
 	doVideoPlay(parameters) {
 		const vidParams = parameters.split('"');
 		const position = parseFloat(vidParams[6].substr(1));
-		console.log('Position: ' + position);
-		window.self.handyHSSPStart(parseInt(position));
+		window.self.handyHSSPStart(parseInt(position) + window.syncOffset );
 	}
 	
 	doVideoPause(parameters) {
@@ -133,9 +152,6 @@ class Background {
 			function(state) {
 				if ( state == 4 ) {
 					window.self.handyHSSPStart(parseInt(position));
-					console.log('Seeking to new position.');
-				} else {
-					console.log('Seek received. Handy not running.');
 				}
 			}
 		);
@@ -440,17 +456,14 @@ class Background {
 			}
 			if (xhr.status === 400) {
 				console.log(requestType + ' Error: Bad Request');
-				window.self.checkConnected();
 				return false;
 			}
 			if (xhr.status === 502) {
 				console.log(requestType + ' Error: Machine not connected');
-				window.self.checkConnected();
 				return false;
 			}
 			if (xhr.status === 504) {
 				console.log(requestType + ' Error: Machine timeout');
-				window.self.checkConnected();
 				return false;
 			}
 	}
@@ -505,6 +518,8 @@ class Background {
 					if ( retries < window.retryAttempts ) {
 						window.self.handySetMode( mode, callback, retries+1 );
 					} else {
+						window.backgroundStatus.loadFileStatus = 'Error setting handy mode';
+						window.self.updatePopup();
 						window.self.addErrorMessage('Set Mode failed.');
 					}
 				}
@@ -644,8 +659,8 @@ class Background {
 		};
 		
 		var data =  {
-			'min': scaleSlideNumber(min),
-			'max': scaleSlideNumber(max),
+			'min': min,
+			'max': max,
 		};
 		xhr.send( JSON.stringify(data) );
 	}
@@ -770,7 +785,8 @@ class Background {
 					if ( retries < window.retryAttempts ) {
 						window.self.handyHSSPSetup( window.backgroundStatus.patternsUrl, callback, retries+1 );
 					} else {
-						window.self.addErrorMessage('Upload patterns failed.');
+						window.backgroundStatus.loadFileStatus = 'Upload patterns to handy failed.';
+						window.self.updatePopup();
 					}
 				}
 			}
@@ -850,9 +866,9 @@ class Background {
 		
 		xhr.onreadystatechange = function () {
 			if (xhr.readyState === XMLHttpRequest.DONE ) {
-				window.self.handyStatusHandler(xhr, window.KEY_getConnected);
+				const result = window.self.handyStatusHandler(xhr, window.KEY_getConnected);
 				if (callback && typeof(callback) === "function") {
-					callback();
+					callback(result);
 				}
 			}
 		};
@@ -900,7 +916,7 @@ class Background {
 	}
 	
 	syncServerTime() {
-		window.self.handyServerTime(window.self.updateOverlay, 10);
+		window.self.handyServerTime(  function(){} , 10);
 	}
 	
 	
@@ -914,11 +930,23 @@ class Background {
 
 	syncPrepare(url) {
 		window.self.syncServerTime();
+		window.backgroundStatus.loadFileStatus = 'Preparing pattern file';
+		window.self.updatePopup();
 		window.self.uploadPatternFile(window.backgroundStatus.scriptFileURL,
 			function() {
+				window.backgroundStatus.loadFileStatus = 'Setting handy mode';
+				window.self.updatePopup();
 				window.self.handySetMode(1,
 					function() {
-						window.self.handyHSSPSetup(window.backgroundStatus.patternsUrl);
+						window.backgroundStatus.loadFileStatus = 'Sending pattern file to handy';
+						window.self.updatePopup();
+						window.self.handySetSlide(window.masterStroke.start, window.masterStroke.stop);
+						window.self.handyHSSPSetup(window.backgroundStatus.patternsUrl, 
+							function() {
+								window.backgroundStatus.loadFileStatus = 'Handy ready to play';
+								window.self.updatePopup();
+							}
+						);
 					}
 				);
 			}
@@ -928,11 +956,15 @@ class Background {
 
     uploadPatternFile(url, callback) {
 		
+		if (!url.includes('.csv') && !url.includes('.funscript') ) {
+			window.backgroundStatus.scriptFileStatus = 'Invalid file type, use csv or funscript';
+			window.self.updatePopup();
+			return;
+		}
+		
 		fetch( url )
 		.then(
 			function(response) {
-				console.log('Fetch');
-				console.log(response);
 			    response.text().then(function(patterns) {
 					const csv = new File([patterns], 'script', { type: 'text/plain' });
 					const data = new FormData();
@@ -944,7 +976,9 @@ class Background {
 						.then(
 							function(response) {
 								if (response.status !== 200) {
-									console.log('Error uploading patterns: ' + response.status);
+									window.backgroundStatus.scriptFileStatus = 'Error fetching script file';
+									window.backgroundStatus.loadFileStatus = 'Press upload when ready';
+									window.self.updatePopup();
 									return;
 								}
 
@@ -952,11 +986,15 @@ class Background {
 								response.json().then(function(data) {
 									if ( data.success ) {
 										window.backgroundStatus.patternsUrl = data.url;
-										window.self.updateOverlay();
+										window.backgroundStatus.scriptFileStatus = 'Success fetching script file';
+										window.self.updatePopup();
 										if (callback && typeof(callback) === "function") {
 											callback();
 										}
 									} else {
+										window.backgroundStatus.scriptFileStatus = 'Error fetching script file';
+										window.backgroundStatus.loadFileStatus = 'Press upload when ready';
+										window.self.updatePopup();
 										console.log('Error uploading patterns: ' + response.status);
 									}
 								});
@@ -964,12 +1002,18 @@ class Background {
 						)
 						.catch(function(err) {
 							window.isSyncPreparing = false;
+							window.backgroundStatus.scriptFileStatus = 'Error fetching script file';
+							window.backgroundStatus.loadFileStatus = 'Press upload when ready';
+							window.self.updatePopup();
 							console.log('Fetch Error :-S', err);
 						});
 							});
 						}
 					)
 		.catch(function(err) {
+			window.backgroundStatus.scriptFileStatus = 'Error fetching script file';
+			window.backgroundStatus.loadFileStatus = 'Press upload when ready';
+			window.self.updatePopup();
 			console.log('Fetch Error :-S', err);
 		});
     }
@@ -982,16 +1026,17 @@ class Background {
 	pause() {
 		// This is a pause in the extension
 		window.backgroundStatus.paused = !window.backgroundStatus.paused;
-		chrome.runtime.sendMessage( [ 'update_popup' ] );
+		window.self.updatePopup();
 		if ( window.backgroundStatus.paused ) {
 			window.self.stopHandy();
 		} else {
 			// Something about resuming play, if we keep the pause function
 
 		}
-		window.self.sendMessageToContent( { "updateOverlay": window.backgroundStatus } );
+		// window.self.sendMessageToContent( { "updatePopup": window.backgroundStatus } );
 	}
 	
+	/*
 	sendMessageToContent(message, callback) {
 		// I wonder if this can be linked back to the manifest list
 		// query doesn't seem to accept regex expressions, so have to loop through urls
@@ -1007,8 +1052,9 @@ class Background {
 			});
 		}
 	}
+	*/
 	
-	updateStatus(count) {
+	updateContentScriptCount(count) {
 		window.backgroundStatus.contentScriptCount += count;
 		window.self.checkConnected();
 	}
@@ -1020,16 +1066,13 @@ class Background {
 		window.self.checkConnected();
 	}
 	
-	updateOverlay() {
-		window.self.sendMessageToContent( { "updateOverlay": window.backgroundStatus } );
+	updatePopup() {
+		chrome.runtime.sendMessage( [ 'update_popup', window.backgroundStatus ] );
 	}
 	
 	checkConnected() {
-		if ( window.backgroundStatus.contentScriptCount <= 0 ) return;
-		var connected = window.backgroundStatus.handyConnected;
 		window.self.handyGetConnected(function() {
-			//if ( connected != window.backgroundStatus.handyConnected)
-			window.self.updateOverlay();
+			window.self.updatePopup();
 		});
 	}
 }

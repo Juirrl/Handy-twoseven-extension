@@ -23,26 +23,24 @@ class Popup {
 			},
 		};
 		
-
-		for ( var i = 0; i <= this.levels-1 ; i++ ) {
-			$("#level"+i+"StrokeSlider").ionRangeSlider(strokeSliderStyle);
-			$("#level"+i+"SpeedSlider").ionRangeSlider(speedSliderStyle);
-			this.levelTracker[i] = [0];
-			if ( $("#level"+i+"right").length ) $("#level"+i+"right").click(i, function(i) {
-					self.rightButtonClick(i);
-				});
-			if ( $("#level"+i+"left").length ) $("#level"+i+"left").click(i, function(i) {
-					self.leftButtonClick(i);
-				});
-				
-			if ( $("#level"+i+"NoteTextField").length ) $("#level"+i+"NoteTextField").on('input', function() {
-					self.onNoteChange();
-				});
-			if ($("#level"+i+"DelaySlider").length)	$("#level"+i+"DelaySlider").ionRangeSlider(delaySliderStyle);
-		}
-		$("#masterStrokeSlider").ionRangeSlider(strokeSliderStyle);
+		var syncSliderStyle = {
+			skin: "sharp",
+			force_edges: true,
+			postfix: "ms",
+			type: "single",
+			min: -500,
+			max: 500,
+			step: 1,
+			min_interval: 10,
+			decorate_both: false,
+			grid: false,
+			onFinish: function (data) {
+				self.updateSync(data);
+			},
+		};
 		
-
+		$("#masterStrokeSlider").ionRangeSlider(strokeSliderStyle);
+		$("#syncOffsetSlider").ionRangeSlider(syncSliderStyle);
 	
 		chrome.storage.sync.get(['connectionKey'], function(result) {
 			if ( !chrome.runtime.error && result != null && result.connectionKey != undefined) this.connectionKeyTextField.value = result.connectionKey;
@@ -72,13 +70,15 @@ class Popup {
             chrome.runtime.sendMessage( [ "handyUploadScript" ] );
         });
 		
-		chrome.runtime.onMessage.addListener(function(message, messageSender, sendResponse) {
-			if ( message.includes('update_popup' ) ) {
-				self.updatePopup();
+		chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+			if ( message.includes('update_popup') ) {
+				this.updatePopup(message[1]);
 			}
 		});
+		
+		this.getSliderValues();
 
-        this.updatePopup();
+        chrome.runtime.sendMessage( [ "updatePopupRequest" ] );
     }
 	
 	/*
@@ -91,8 +91,28 @@ class Popup {
     }
 	*/
 
-    updatePopup() {
-        // this.updatePauseButton();
+    updatePopup(data) {
+		var connectionNode = $('#connectionStatusText');
+		if ( connectionNode != null ) {
+			if ( data.handyConnected ) {
+				connectionNode.text('Connected');
+				connectionNode.css("color", "green");
+			} else {
+				connectionNode.text('Not Connected');
+				connectionNode.css("color", "red");
+
+			}
+		}
+		connectionNode = null;
+		connectionNode = $('#scriptFileStatusText');
+		if ( connectionNode != null ) {
+			connectionNode.text(data.scriptFileStatus);
+		}
+		connectionNode = null;
+		connectionNode = $('#loadFileStatusText');
+		if ( connectionNode != null ) {
+			connectionNode.text(data.loadFileStatus);
+		}
     }
 	
 	 setConnectionKey(connectionKey) {
@@ -103,25 +123,31 @@ class Popup {
 		chrome.storage.sync.set( { 'scriptFileURL': url } );
     }
 	
-	getMasterStroke() {
+	getSliderValues() {
 		chrome.storage.sync.get(['masterStroke'], function(result) {
 			if ( !chrome.runtime.error && result != null && result.masterStroke != undefined) {
 				var masterStroke = result.masterStroke;
-				$("#masterStrokeSlider").data("ionRangeSlider").update({ from: masterStroke.strokeStart , to: masterStroke.strokeStop});
+				$("#masterStrokeSlider").data("ionRangeSlider").update({ from: masterStroke.start , to: masterStroke.stop});
 			} else {
 				chrome.extension.getBackgroundPage().console.log('Error, master stroke not found');
 			}
 			
 		});
+		chrome.storage.sync.get(['syncOffset'], function(result) {
+			if ( !chrome.runtime.error && result != null && result.syncOffset != undefined) {
+				$("#syncOffsetSlider").data("ionRangeSlider").update({ from: result.syncOffset });
+			} else {
+				chrome.extension.getBackgroundPage().console.log('Error, Sync offset not found');
+			}
+		});
 	}
 	
 	updateStroke(data) {
-		var index = data.input[0].name;
-		if ( index == "master" ) {
-			var masterStroke =  { strokeStart: data.from, strokeStop: data.to };
-			chrome.storage.sync.set( { 'masterStroke': masterStroke } );
-			return;
-		}
+		chrome.storage.sync.set( { 'masterStroke': { start: data.from, stop: data.to } } );
+	}
+	
+	updateSync(data) {
+		chrome.storage.sync.set( { 'syncOffset': data.from } );
 	}
 	
 }
