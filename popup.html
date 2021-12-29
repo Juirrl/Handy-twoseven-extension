@@ -26,6 +26,9 @@
 						<a style="color:black; ">Status:&nbsp;</a>
 						<a  style="color:blue;" id="connectionStatusText">None</a>
 					</div>
+					<div style="display:flex; align-items:center; justify-content:center; white-space:pre-wrap;">
+						<button class="menuitem" id="handyPauseButton">Pause</button>
+					</div>	
 				</div>
 				<div class="divTableCell">
 					Master Stroke Range
@@ -36,9 +39,12 @@
 			</div>
 			<div class="divTableRow">
 				<div class="divTableCell">
-					<div>
-						Script File URL:&nbsp;
-						<input type="text" name="" id="scriptFileURLTextField" >
+					<div style="display:flex; align-items:center; justify-content:center; white-space:pre-wrap;">
+						<button class="menuitem" id="handySelectScriptButton">Select script</button>
+					</div>	
+					<div style="display:flex; align-items:center; justify-content:center; white-space:pre-wrap;">
+						<label for="scriptNameText">Script: </label>
+						<a  style="color:red;" id="scriptNameText">None</a>
 					</div>	
 					<div style="display:flex; align-items:center; justify-content:center; white-space:pre-wrap;">
 						<a style="color:black; ">Status:&nbsp;</a>
@@ -46,7 +52,7 @@
 					</div>
 				</div>
 				<div class="divTableCell">
-					<div class="menu">
+					<div class="menu" style="display:flex; align-items:center; justify-content:center; white-space:pre-wrap;">
 						<button class="menuitem" id="handyUploadScriptButton">Load script to Handy</button>
 					</div>	
 					<div style="display:flex; align-items:center; justify-content:center; white-space:pre-wrap;">

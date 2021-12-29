@@ -46,7 +46,6 @@ function onContentScriptInitialized() {
 	}
 
 	inject(script);
-
 	
 }
 

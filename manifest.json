@@ -1,13 +1,13 @@
 {
     "name": "Handy TwoSeven Extension",
-    "version": "0.1",
+    "version": "0.2.0",
     "manifest_version": 2,
     "permissions": [
 		"storage",
 		"unlimitedStorage",
 		"webRequest",
 		"*://twoseven.xyz/*",
-		"*://*/*" 
+		"file://*/*" 
     ],
     "browser_action": {
         "default_popup": "popup.html",

@@ -13,24 +13,20 @@ class Background {
 		};
 		
 		window.syncOffset = 0;
+		
+		window.scriptFileData = undefined;
 
 		window.backgroundStatus = {
+			scriptLoaded: false,
 			connectionKey: undefined,
-			scriptFileURL: undefined,
+			scriptFileName: undefined,
 			handyConnected: false,
 			contentScriptCount: 0,
 			paused: false,
 			scriptFileStatus: "",
 			loadFileStatus: "Select load when ready",
-			mode: -1, // These are the theoretical things the machine should be doing
-			levelEntry: -1,
-			level: -1,
-			step: -1,
-			pattern: -1,
-			strokeStart: -1,
-			strokeStop: -1,
-			velocity: -1,
 			errorMessages: [],
+			playtime: 0,
 			offset: 0,
 			patternsUrl: undefined,
 		};
@@ -38,6 +34,7 @@ class Background {
 		window.sha256 = 'f10fb07e14335324f252a83545b48b9f677e5581b261f981e1734bd82a490ddf';
 		window.retryAttempts = 2;
 		window.KEY_serverTime = 'Get Server Time';
+		window.KEY_HSSPState= 'HSSP State';
 		window.KEY_HSSPSetup = 'Upload Patterns';
 		window.KEY_getSync = 'Get Sync';
 		window.KEY_HSSPStart = 'Starting Pattern';
@@ -68,8 +65,8 @@ class Background {
 			if ( message.includes('setStop' ) ) {
 				window.self.stop();
 			}
-			if ( message.includes('handyPause' ) ) {
-				window.self.pause();
+			if ( message.includes('pauseButton' ) ) {
+				window.self.pauseButton();
 			}
 			if ( message.includes('handyUploadScript' ) ) {
 				window.self.syncPrepare();
@@ -83,7 +80,15 @@ class Background {
 			if ( message.includes('updatePopupRequest' ) ) {
 				window.self.updatePopup();
 			}  
+			if ( message.includes('checkConnectedRequest') ) {
+				window.self.checkConnected();
+			}
+			if ( message.includes('setScriptFile') ) {
+				window.self.setScriptFile(message[1], message[2]);
+			}
 		});
+		
+		chrome.runtime.onInstalled.addListener(window.self.installScript);
 		
 		chrome.runtime.onMessageExternal.addListener(
 			function(request, sender, sendResponse) {
@@ -110,6 +115,12 @@ class Background {
 			}
 		});	
 		
+		chrome.storage.sync.get(['scriptFileURL'], function(result) {
+			if ( !chrome.runtime.error && result != null && result.scriptFileURL != undefined ) {
+				window.backgroundStatus.scriptFileURL = result.scriptFileURL;	
+			}
+		});	
+		
 		chrome.storage.onChanged.addListener(function(changes, namespace) {
 			for (let [key, { oldValue, newValue }] of Object.entries(changes)) {
 				if(key === 'masterStroke') {
@@ -118,10 +129,11 @@ class Background {
 				}
 				if(key === 'connectionKey') {
 					window.backgroundStatus.connectionKey = newValue;
-					window.self.checkConnected();
+					window.self.adjustSync();
 				}
-				if(key === 'scriptFileURL') {
-					window.backgroundStatus.scriptFileURL = newValue;
+				if(key === 'syncOffset') {
+					window.syncOffset = newValue;
+					window.self.adjustSync();
 				}
 			}
 		});
@@ -138,26 +150,26 @@ class Background {
 	doVideoPlay(parameters) {
 		const vidParams = parameters.split('"');
 		const position = parseFloat(vidParams[6].substr(1));
-		window.self.handyHSSPStart(parseInt(position) + window.syncOffset );
+		window.backgroundStatus.playtime = parseInt(position) - new Date().getTime();
+		if ( window.backgroundStatus.scriptLoaded && !window.backgroundStatus.paused) window.self.handyHSSPStart(parseInt(position) + window.syncOffset );
 	}
 	
 	doVideoPause(parameters) {
-		window.self.stopHandy();
+		window.backgroundStatus.playtime = 0;
+		if ( window.backgroundStatus.scriptLoaded ) window.self.stopHandy();
 	}
 	
 	doVideoSeek(parameters) {
-		const vidParams = parameters.split('"');
-		const position = parseFloat(vidParams[6].substr(1));
-		window.self.handyHSSPState(
-			function(state) {
-				if ( state == 4 ) {
-					window.self.handyHSSPStart(parseInt(position));
-				}
-			}
-		);
-		
+		// Checking local variable to see if the handy should be playing already, handyHSSPState takes too long and throws off the sync
+		if ( window.backgroundStatus.playtime == 0 ) return;
+		if ( window.backgroundStatus.scriptLoaded && !window.backgroundStatus.paused ) window.self.doVideoPlay(parameters);
 	}
 	
+	adjustSync() {
+		if ( window.backgroundStatus.playtime == 0 ) return;
+		const position = window.backgroundStatus.playtime + new Date().getTime();
+		if ( window.backgroundStatus.scriptLoaded && !window.backgroundStatus.paused ) window.self.handyHSSPStart(parseInt(position) + window.syncOffset );
+	}
 	
 	getDefaultMasterStroke() {
 		return { strokeStart: 0, strokeStop: 100 };
@@ -685,14 +697,11 @@ class Background {
 					if (callback && typeof(callback) === "function") {
 						callback();
 					}
-					clearTimeout(window.patternTimeout);
-					window.patternTimeout = setTimeout(window.self.handyHSSPStart, window.patternLength * 1000, time);
-					// The patterns are only 60 seconds long in the pattern file, so we have to reset to the beginning every so often.
 				} else {
 					if ( retries < window.retryAttempts ) {
 						window.self.handyHSSPStart( time, callback, retries+1 );
 					} else {
-						window.self.addErrorMessage('Start pattern failed.');
+						window.self.addErrorMessage('Start hssp failed.');
 					}
 				}
 			}
@@ -715,7 +724,7 @@ class Background {
 		
 		xhr.onreadystatechange = function () {
 			if (xhr.readyState === XMLHttpRequest.DONE ) {
-				if ( window.self.handyStatusHandler(xhr, window.KEY_getHSSPState)   ) {
+				if ( window.self.handyStatusHandler(xhr, window.KEY_HSSPState)   ) {
 					var mode = JSON.parse(xhr.response).state;
 					if (callback && typeof(callback) === "function") {
 						callback(mode);
@@ -922,29 +931,30 @@ class Background {
 	
 	cancelCurrentRequests() {
 		for ( var i = 0 ; i < window.xhrRequests.length ; i++ ) window.xhrRequests[i].abort();
-		clearTimeout(window.stepTimeout);
-		clearTimeout(window.patternTimeout);
 		window.xhrRequests = [];
 	}
 
 
 	syncPrepare(url) {
+		window.backgroundStatus.scriptLoaded = false;
 		window.self.syncServerTime();
-		window.backgroundStatus.loadFileStatus = 'Preparing pattern file';
+		window.backgroundStatus.loadFileStatus = 'Preparing script';
 		window.self.updatePopup();
-		window.self.uploadPatternFile(window.backgroundStatus.scriptFileURL,
+		window.self.uploadPatternFile(
 			function() {
 				window.backgroundStatus.loadFileStatus = 'Setting handy mode';
 				window.self.updatePopup();
 				window.self.handySetMode(1,
 					function() {
-						window.backgroundStatus.loadFileStatus = 'Sending pattern file to handy';
+						window.backgroundStatus.loadFileStatus = 'Sending script to handy';
 						window.self.updatePopup();
 						window.self.handySetSlide(window.masterStroke.start, window.masterStroke.stop);
 						window.self.handyHSSPSetup(window.backgroundStatus.patternsUrl, 
 							function() {
+								window.backgroundStatus.scriptLoaded = true;
 								window.backgroundStatus.loadFileStatus = 'Handy ready to play';
 								window.self.updatePopup();
+								window.self.adjustSync();
 							}
 						);
 					}
@@ -954,68 +964,56 @@ class Background {
 		window.self.checkConnected();
 	}
 
-    uploadPatternFile(url, callback) {
+    uploadPatternFile(callback) {
 		
-		if (!url.includes('.csv') && !url.includes('.funscript') ) {
-			window.backgroundStatus.scriptFileStatus = 'Invalid file type, use csv or funscript';
+		if ( window.backgroundStatus.scriptFileName == undefined || window.scriptFileData == undefined ) {
+			window.backgroundStatus.scriptFileStatus = 'Error: Select a script.';
 			window.self.updatePopup();
-			return;
+			return;			
 		}
 		
-		fetch( url )
-		.then(
-			function(response) {
-			    response.text().then(function(patterns) {
-					const csv = new File([patterns], 'script', { type: 'text/plain' });
-					const data = new FormData();
-					data.append('syncFile', csv);
-					fetch('https://www.handyfeeling.com/api/sync/upload', {
-						method: 'POST',
-						body: data,
-					})
-						.then(
-							function(response) {
-								if (response.status !== 200) {
-									window.backgroundStatus.scriptFileStatus = 'Error fetching script file';
-									window.backgroundStatus.loadFileStatus = 'Press upload when ready';
-									window.self.updatePopup();
-									return;
-								}
+		const csv = new File([window.scriptFileData], 'script', { type: 'text/plain' });
+		const data = new FormData();
+		data.append('syncFile', csv);
+		fetch('https://www.handyfeeling.com/api/sync/upload', {
+			method: 'POST',
+			body: data,
+		})
+			.then(
+				function(response) {
+					if (response.status !== 200) {
+						window.backgroundStatus.scriptFileStatus = 'Error loading script file';
+						window.backgroundStatus.loadFileStatus = 'Press upload when ready';
+						window.self.updatePopup();
+						return;
+					}
 
-							// Examine the text in the response
-								response.json().then(function(data) {
-									if ( data.success ) {
-										window.backgroundStatus.patternsUrl = data.url;
-										window.backgroundStatus.scriptFileStatus = 'Success fetching script file';
-										window.self.updatePopup();
-										if (callback && typeof(callback) === "function") {
-											callback();
-										}
-									} else {
-										window.backgroundStatus.scriptFileStatus = 'Error fetching script file';
-										window.backgroundStatus.loadFileStatus = 'Press upload when ready';
-										window.self.updatePopup();
-										console.log('Error uploading patterns: ' + response.status);
-									}
-								});
+				// Examine the text in the response
+					response.json().then(function(data) {
+						if ( data.success ) {
+							window.backgroundStatus.patternsUrl = data.url;
+							window.backgroundStatus.scriptFileStatus = 'Success loading script file';
+							window.self.updatePopup();
+							if (callback && typeof(callback) === "function") {
+								callback();
 							}
-						)
-						.catch(function(err) {
-							window.isSyncPreparing = false;
-							window.backgroundStatus.scriptFileStatus = 'Error fetching script file';
+						} else {
+							window.backgroundStatus.scriptFileStatus = 'Error loading script file';
 							window.backgroundStatus.loadFileStatus = 'Press upload when ready';
 							window.self.updatePopup();
-							console.log('Fetch Error :-S', err);
-						});
-							});
+							console.log('Error uploading patterns: ' + response.status);
 						}
-					)
-		.catch(function(err) {
-			window.backgroundStatus.scriptFileStatus = 'Error fetching script file';
-			window.backgroundStatus.loadFileStatus = 'Press upload when ready';
-			window.self.updatePopup();
-			console.log('Fetch Error :-S', err);
-		});
+					});
+				}
+			)
+			.catch(function(err) {
+				window.isSyncPreparing = false;
+				window.backgroundStatus.scriptFileStatus = 'Error uploading script to handy server';
+				window.backgroundStatus.loadFileStatus = 'Press upload when ready';
+				window.self.updatePopup();
+				console.log('Fetch Error :-S', err);
+			});
+
     }
 	
 	stopHandy() {
@@ -1023,17 +1021,16 @@ class Background {
 		window.self.handyStopHSSP();
 	}
 	
-	pause() {
+	pauseButton() {
 		// This is a pause in the extension
 		window.backgroundStatus.paused = !window.backgroundStatus.paused;
 		window.self.updatePopup();
 		if ( window.backgroundStatus.paused ) {
 			window.self.stopHandy();
 		} else {
-			// Something about resuming play, if we keep the pause function
+			window.self.adjustSync();
 
 		}
-		// window.self.sendMessageToContent( { "updatePopup": window.backgroundStatus } );
 	}
 	
 	/*
@@ -1075,31 +1072,50 @@ class Background {
 			window.self.updatePopup();
 		});
 	}
+	
+	setScriptFile(fileName, fileData) {
+		window.backgroundStatus.scriptLoaded = false;
+		window.backgroundStatus.scriptFileName = fileName;
+		window.scriptFileData = fileData;
+		window.self.updatePopup();
+	}
+	
+	installScript(details){
+		
+		function urlMatch(str, rules) {
+			rules.forEach( function(rule) {
+				var escapeRegex = (str) => str.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, "\\$1");
+				if ( new RegExp("^" + rule.split("*").map(escapeRegex).join(".*") + "$").test(str) ) {
+					return true;
+				} 
+			});
+			return false;
+		}
+		// console.log('Installing content script in all tabs that match content_scripts matches.');
+		let params = {
+			currentWindow: true
+		};
+		chrome.tabs.query(params, function gotTabs(tabs){
+			let contentjsFile = chrome.runtime.getManifest().content_scripts[0].js[0];
+			const rules = chrome.runtime.getManifest().content_scripts[0].matches;
+			for (let index = 0; index < tabs.length; index++) {
+				const url = tabs[index].url;
+				if ( rules != undefined && url != undefined && urlMatch(url, rules) ) {
+					console.log(tabs[index].url);
+					chrome.tabs.executeScript(tabs[index].id, {
+						file: contentjsFile
+					},
+					result => {
+						const lastErr = chrome.runtime.lastError;
+						if (lastErr) {
+							console.error('tab: ' + tabs[index].id + ' lastError: ' + JSON.stringify(lastErr));
+						}
+					})
+				}
+			}
+		});    
+	}
 }
 
 new Background();
 
-
-chrome.runtime.onInstalled.addListener(() => {
-	// ver. 0.1の時に使っていたlocalStorageの削除
-	// Remove localStorage data that is used by extension ver. 0.1.
-	localStorage.clear();
-
-	// 読み込み/更新時に既存のタブで実行する
-	// Execute content scripts for existing tabs when extension installed/reloaded.
-	chrome.tabs.query({
-		url: '*://twoseven.xyz/*',
-	}, tabs => {
-		tabs.forEach(tab => {
-			chrome.tabs.executeScript(tab.id, {
-				file: 'content_script.js',
-				allFrames: true,
-			}, result => {
-				if (typeof result === 'undefined') {
-					const message = chrome.i18n.getMessage('page_not_loaded');
-					console.info(message, tab);
-				}
-			});
-		});
-	});
-});

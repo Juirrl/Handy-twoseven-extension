@@ -6,6 +6,7 @@ class Popup {
 		window.self = this;
 		
 		this.backgroundScript = chrome.extension.getBackgroundPage();
+		this.scriptfiles = undefined;
 		
 		var strokeSliderStyle = {
 			skin: "sharp",
@@ -46,9 +47,7 @@ class Popup {
 			if ( !chrome.runtime.error && result != null && result.connectionKey != undefined) this.connectionKeyTextField.value = result.connectionKey;
 		});
 		
-		chrome.storage.sync.get(['scriptFileURL'], function(result) {
-			if ( !chrome.runtime.error && result != null && result.scriptFileURL != undefined) this.scriptFileURLTextField.value = result.scriptFileURL;
-		});
+
 
 
         $("#connectionKeyTextField").on("change", () => {
@@ -60,14 +59,17 @@ class Popup {
         });
 		
 		
-		/* This button doesn't exist atm
 		$("#handyPauseButton").bind("click", () => {
-            chrome.runtime.sendMessage( [ "handyPause" ] );
+            chrome.runtime.sendMessage( [ "pauseButton" ] );
         });
-		*/
+		
+		handySelectScriptButton
+		$("#handySelectScriptButton").bind("click", () => {
+			this.openScriptFile();
+        });
 		
 		$("#handyUploadScriptButton").bind("click", () => {
-            chrome.runtime.sendMessage( [ "handyUploadScript" ] );
+			chrome.runtime.sendMessage( [ "handyUploadScript" ] );
         });
 		
 		chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -79,30 +81,44 @@ class Popup {
 		this.getSliderValues();
 
         chrome.runtime.sendMessage( [ "updatePopupRequest" ] );
+		
+		function checkConnected() {
+			chrome.runtime.sendMessage( [ "checkConnectedRequest" ] );
+		}
+		
+		checkConnected();
+		setInterval(checkConnected, 500);
     }
 	
-	/*
 	updatePauseButton() {
 		if ( this.backgroundScript.backgroundStatus.paused ) {
-			$("#handyPauseButton").html('Unpause');
+			$("#handyPauseButton").html('Play');
 		} else {
 			$("#handyPauseButton").html('Pause');
 		}
     }
-	*/
 
     updatePopup(data) {
+		this.updatePauseButton();
 		var connectionNode = $('#connectionStatusText');
 		if ( connectionNode != null ) {
+			var pausedStatus = "";
+			if (data.paused) pausedStatus = ' (paused)';
 			if ( data.handyConnected ) {
-				connectionNode.text('Connected');
+				connectionNode.text('Connected' + pausedStatus);
 				connectionNode.css("color", "green");
 			} else {
-				connectionNode.text('Not Connected');
+				connectionNode.text('Not Connected' + pausedStatus);
 				connectionNode.css("color", "red");
 
 			}
 		}
+		connectionNode = null;
+		connectionNode = $('#scriptNameText');
+		if ( connectionNode != null ) {
+			connectionNode.text(data.scriptFileName);
+			connectionNode.css("color", "green");
+		}		
 		connectionNode = null;
 		connectionNode = $('#scriptFileStatusText');
 		if ( connectionNode != null ) {
@@ -149,6 +165,38 @@ class Popup {
 	updateSync(data) {
 		chrome.storage.sync.set( { 'syncOffset': data.from } );
 	}
+	
+	async openScriptFile() {
+	try {
+		const pickerOpts = {
+			types: [
+				{
+					description: 'Scripts',
+					accept: {
+						'script/*': ['.csv', '.funscript']
+					}
+				},
+			],
+			excludeAcceptAllOption: true,
+			multiple: false
+		}
+		const [fileHandle] = await window.showOpenFilePicker( pickerOpts );
+		const fileData = await fileHandle.getFile();
+		let fileName = fileData.name;
+		let reader = new FileReader();
+		reader.readAsText(fileData);
+		reader.onload = function() {
+			chrome.runtime.sendMessage( [ "setScriptFile", fileName, reader.result ] );
+		};
+		
+		reader.onerror = function() {
+			chrome.extension.getBackgroundPage().console.log(reader.error);
+		};
+		
+	} catch (err) {
+		chrome.extension.getBackgroundPage().console.log(err.name, err.message);
+	}
+}
 	
 }
 

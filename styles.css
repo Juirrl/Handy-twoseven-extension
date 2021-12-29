@@ -14,6 +14,13 @@
 
 #popupBody select {
     font-family: inherit;
+	width: auto;
+	overflow: hidden;
+}
+
+#popupBody select, option {
+	width: 200px;
+	overflow: hidden;
 }
 
 #popupBody textarea {
@@ -96,3 +103,4 @@
 #popupBody  .divTableBody {
 	display: table-row-group;
 }
+
