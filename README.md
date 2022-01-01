@@ -4,7 +4,8 @@ Handy Twoseven Extension is a chrome extension that will sync the handy with vid
 
 ## Installation
 
-Download the project to your local drive. Then open manage extensions in chrome. Select load unpacked and choose the location of the package.   
+Download the project to your local drive. Uncompress the folder.  
+Then open manage extensions in chrome. Select load unpacked and choose the location of the uncompressed folder.  
 There are no plans to submit this extension for approval in the chrome store.  
 Your handy must be updated to FW3.  
 "Allow access to file URLs" must be turned on in the Extension Details page. By default this is on for locally installed extensions.  
@@ -15,6 +16,10 @@ Open the extensions popup and enter your handy's connection key.
 Click on 'Select script' to select a script file.  
 Click on 'Load script to Handy', the script file will be uploaded to thehandyfeeling.com server, then downloaded to the handy.  
 You are now ready to play, join the twoseven chat room.  
+
+## Documentation
+
+[See wiki](https://github.com/Juirrl/Handy-twoseven-extension/wiki)
 
 ## Known Issues
 
