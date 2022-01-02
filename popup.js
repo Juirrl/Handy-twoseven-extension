@@ -102,32 +102,26 @@ class Popup {
 		this.updatePauseButton();
 		var connectionNode = $('#connectionStatusText');
 		if ( connectionNode != null ) {
-			var pausedStatus = "";
-			if (data.paused) pausedStatus = ' (paused)';
-			if ( data.handyConnected ) {
-				connectionNode.text('Connected' + pausedStatus);
-				connectionNode.css("color", "green");
-			} else {
-				connectionNode.text('Not Connected' + pausedStatus);
-				connectionNode.css("color", "red");
-
-			}
+			connectionNode.text(data.connectionStatus);
+			connectionNode.css("color", data.connectionColor);
 		}
 		connectionNode = null;
 		connectionNode = $('#scriptNameText');
 		if ( connectionNode != null ) {
 			connectionNode.text(data.scriptFileName);
-			connectionNode.css("color", "green");
+			connectionNode.css('color', 'green');
 		}		
 		connectionNode = null;
 		connectionNode = $('#scriptFileStatusText');
 		if ( connectionNode != null ) {
 			connectionNode.text(data.scriptFileStatus);
+			connectionNode.css('color', data.scriptFileColor);
 		}
 		connectionNode = null;
 		connectionNode = $('#loadFileStatusText');
 		if ( connectionNode != null ) {
 			connectionNode.text(data.loadFileStatus);
+			connectionNode.css('color', data.loadFileColor);
 		}
     }
 	

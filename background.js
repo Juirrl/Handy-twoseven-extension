@@ -23,8 +23,14 @@ class Background {
 			handyConnected: false,
 			contentScriptCount: 0,
 			paused: false,
-			scriptFileStatus: "",
-			loadFileStatus: window.defaultLoadFileStatus,
+			loading: false,
+			scriptFileStatus: "None",
+			loadFileStatus: "None",
+			connectionStatus: "None",
+			scriptFileColor: "red",
+			loadFileColor: "red",
+			connectionColor: "red",
+			loadStatus : 0, // 0 - Not loading, 1 - Uploading to server, 2 - setting mode, 3 - uploading to handy, 4 - success, 5 - fail, 6 - failed set mode, 7 - failed to play, 8 - failed upload, 9 - failed download, 10 - firmware out of date
 			errorMessages: [],
 			playtime: 0,
 			offset: 0,
@@ -33,7 +39,6 @@ class Background {
 		
 		window.sha256 = 'f10fb07e14335324f252a83545b48b9f677e5581b261f981e1734bd82a490ddf';
 		window.retryAttempts = 2;
-		window.defaultLoadFileStatus = 'Script not loaded.';
 		window.KEY_getInfo = 'Get Handy info';
 		window.KEY_serverTime = 'Get Server Time';
 		window.KEY_HSSPState= 'HSSP State';
@@ -140,6 +145,8 @@ class Background {
 			}
 		});
 		
+		window.self.updateStatusMessages();
+		
     }
 	
 	videoShareMessage(message) {
@@ -153,24 +160,27 @@ class Background {
 		const vidParams = parameters.split('"');
 		const position = parseFloat(vidParams[6].substr(1));
 		window.backgroundStatus.playtime = parseInt(position) - new Date().getTime();
-		if ( window.backgroundStatus.scriptLoaded && !window.backgroundStatus.paused) window.self.handyHSSPPlay(parseInt(position) + window.syncOffset );
+		if ( window.backgroundStatus.handyConnected && window.backgroundStatus.loadStatus == 4 && !window.backgroundStatus.paused) 
+			window.self.handyHSSPPlay(parseInt(position) + window.syncOffset );
 	}
 	
 	doVideoPause(parameters) {
 		window.backgroundStatus.playtime = 0;
-		if ( window.backgroundStatus.scriptLoaded ) window.self.stopHandy();
+		if ( window.backgroundStatus.handyConnected && window.backgroundStatus.loadStatus == 4 && !window.backgroundStatus.paused) window.self.stopHandy();
 	}
 	
 	doVideoSeek(parameters) {
 		// Checking local variable to see if the handy should be playing already, handyHSSPState takes too long and throws off the sync
 		if ( window.backgroundStatus.playtime == 0 ) return;
-		if ( window.backgroundStatus.scriptLoaded && !window.backgroundStatus.paused ) window.self.doVideoPlay(parameters);
+		if ( window.backgroundStatus.handyConnected && window.backgroundStatus.loadStatus == 4 && !window.backgroundStatus.paused)
+			window.self.doVideoPlay(parameters);
 	}
 	
 	adjustSync() {
 		if ( window.backgroundStatus.playtime == 0 ) return;
 		const position = window.backgroundStatus.playtime + new Date().getTime();
-		if ( window.backgroundStatus.scriptLoaded && !window.backgroundStatus.paused ) window.self.handyHSSPPlay(parseInt(position) + window.syncOffset );
+		if ( window.backgroundStatus.scriptLoaded && !window.backgroundStatus.paused ) 
+			window.self.handyHSSPPlay(parseInt(position) + window.syncOffset );
 	}
 	
 	getDefaultMasterStroke() {
@@ -533,9 +543,8 @@ class Background {
 					if ( retries < window.retryAttempts ) {
 						window.self.handySetMode( mode, callback, retries+1 );
 					} else {
-						window.backgroundStatus.loadFileStatus = 'Error setting handy mode';
-						window.self.updatePopup();
-						window.self.addErrorMessage('Set Mode failed.');
+						window.backgroundStatus.loadStatus = 6;
+						window.self.updateStatusMessages();
 					}
 				}
 			}
@@ -704,8 +713,8 @@ class Background {
 					if ( retries < window.retryAttempts ) {
 						window.self.handyHSSPPlay( time, callback, retries+1 );
 					} else {
-						window.backgroundStatus.loadFileStatus = 'Failed to play, try reloading.';
-						window.self.updatePopup();
+						window.backgroundStatus.loadStatus = 7;
+						window.self.updateStatusMessages();
 						window.self.addErrorMessage('Start hssp failed.');
 					}
 				}
@@ -799,8 +808,8 @@ class Background {
 					if ( retries < window.retryAttempts ) {
 						window.self.handyHSSPSetup( window.backgroundStatus.patternsUrl, callback, retries+1 );
 					} else {
-						window.backgroundStatus.loadFileStatus = 'Upload patterns to handy failed.';
-						window.self.updatePopup();
+						window.backgroundStatus.loadStatus = 9;
+						window.self.updateStatusMessages();
 					}
 				}
 			}
@@ -885,8 +894,8 @@ class Background {
 					callback(result);
 				} else {
 					window.self.cancelCurrentRequests();
-					window.backgroundStatus.loadFileStatus = 'Handy firmware requires update';
-					window.self.updatePopup();
+						window.backgroundStatus.loadStatus = 10;
+						window.self.updateStatusMessages();
 				}
 			}
 		};
@@ -895,6 +904,19 @@ class Background {
 	}
 	
 	handyGetConnected(callback) {
+		
+		function notConnected() {
+			window.self.cancelCurrentRequests();
+			window.backgroundStatus.handyConnected = false;
+			window.backgroundStatus.loadStatus = 0;
+			window.self.updateStatusMessages();
+		}
+		
+		if ( window.backgroundStatus.connectionKey == undefined || window.backgroundStatus.connectionKey == "" ) {
+			notConnected();
+			return;
+		}
+		
 		var url = window.APIUrl + "/connected";
 		var xhr = new XMLHttpRequest();
 	
@@ -906,12 +928,11 @@ class Background {
 			if (xhr.readyState === XMLHttpRequest.DONE ) {
 				const result = window.self.handyStatusHandler(xhr, window.KEY_getConnected);
 				if (result && callback && typeof(callback) === "function") {
+					window.backgroundStatus.handyConnected = true;
 					callback(result);
 				} else {
 					// The handy is not connected
-					window.self.cancelCurrentRequests();
-					window.backgroundStatus.loadFileStatus = 'Handy not connected';
-					window.self.updatePopup();
+					notConnected();
 				}
 			}
 		};
@@ -971,21 +992,23 @@ class Background {
 
 	syncPrepare(url) {
 		window.backgroundStatus.scriptLoaded = false;
+		window.backgroundStatus.loading = true;
 		window.self.syncServerTime();
-		window.backgroundStatus.loadFileStatus = 'Preparing script';
-		window.self.updatePopup();
+		window.backgroundStatus.loadStatus = 1;
+		window.self.updateStatusMessages();
+		window.self.cancelCurrentRequests();
 		window.self.handyGetInfo( function() {
+			window.backgroundStatus.loadStatus = 1;
 			window.self.uploadPatternFile( function() {
-				window.backgroundStatus.loadFileStatus = 'Setting handy mode';
-				window.self.updatePopup();
+				window.backgroundStatus.loadStatus = 2;
+				window.self.updateStatusMessages();
 				window.self.handySetMode(1, function() {
-					window.backgroundStatus.loadFileStatus = 'Sending script to handy';
-					window.self.updatePopup();
+					window.backgroundStatus.loadStatus = 3;
+					window.self.updateStatusMessages();
 					window.self.handySetSlide(window.masterStroke.start, window.masterStroke.stop);
 					window.self.handyHSSPSetup(window.backgroundStatus.patternsUrl, function() {
-						window.backgroundStatus.scriptLoaded = true;
-						window.backgroundStatus.loadFileStatus = 'Handy ready to play';
-						window.self.updatePopup();
+						window.backgroundStatus.loadStatus = 4;
+						window.self.updateStatusMessages();
 						window.self.adjustSync();
 					});
 				});
@@ -997,9 +1020,8 @@ class Background {
     uploadPatternFile(callback) {
 		
 		if ( window.backgroundStatus.scriptFileName == undefined || window.scriptFileData == undefined ) {
-			window.backgroundStatus.scriptFileStatus = 'Error: Select a script.';
-			window.backgroundStatus.loadFileStatus = window.defaultLoadFileStatus;
-			window.self.updatePopup();
+			window.backgroundStatus.loadStatus = 0;
+			window.self.updateStatusMessages();
 			return;			
 		}
 		
@@ -1012,9 +1034,8 @@ class Background {
 		})
 			.then( function(response) {
 				if (response.status !== 200) {
-					window.backgroundStatus.scriptFileStatus = 'Error loading script file';
-					window.backgroundStatus.loadFileStatus = 'Press upload when ready';
-					window.self.updatePopup();
+						window.backgroundStatus.loadStatus = 8;
+						window.self.updateStatusMessages();
 					return;
 				}
 
@@ -1022,24 +1043,19 @@ class Background {
 				response.json().then(function(data) {
 					if ( data.success ) {
 						window.backgroundStatus.patternsUrl = data.url;
-						window.backgroundStatus.scriptFileStatus = 'Success loading script file';
-						window.self.updatePopup();
 						if (callback && typeof(callback) === "function") {
 							callback();
 						}
 					} else {
-						window.backgroundStatus.scriptFileStatus = 'Error loading script file';
-						window.backgroundStatus.loadFileStatus = 'Press upload when ready';
-						window.self.updatePopup();
-						console.log('Error uploading patterns: ' + response.status);
+						window.backgroundStatus.loadStatus = 6;
+						window.self.updateStatusMessages();
 					}
 				});
 			})
 			.catch(function(err) {
 				window.isSyncPreparing = false;
-				window.backgroundStatus.scriptFileStatus = 'Error uploading script to handy server';
-				window.backgroundStatus.loadFileStatus = 'Press upload when ready';
-				window.self.updatePopup();
+				window.backgroundStatus.loadStatus = 6;
+				window.self.updateStatusMessages();
 				console.log('Fetch Error :-S', err);
 			});
 
@@ -1053,7 +1069,7 @@ class Background {
 	pauseButton() {
 		// This is a pause in the extension
 		window.backgroundStatus.paused = !window.backgroundStatus.paused;
-		window.self.updatePopup();
+		window.self.updateStatusMessages();
 		if ( window.backgroundStatus.paused ) {
 			window.self.stopHandy();
 		} else {
@@ -1099,15 +1115,16 @@ class Background {
 	
 	checkConnected() {
 		window.self.handyGetConnected(function() {
-			window.self.updatePopup();
+			window.self.updateStatusMessages();
 		});
 	}
 	
 	setScriptFile(fileName, fileData) {
 		window.backgroundStatus.scriptLoaded = false;
+		window.backgroundStatus.loadStatus = 0;
 		window.backgroundStatus.scriptFileName = fileName;
 		window.scriptFileData = fileData;
-		window.self.updatePopup();
+		window.self.updateStatusMessages();
 	}
 	
 	installScript(details){
@@ -1145,6 +1162,86 @@ class Background {
 			}
 		});    
 	}
+	
+	updateStatusMessages() {
+		// 	scriptFileStatus
+		// 	scriptFileColor
+		//	loadFileStatus
+		//	loadFileColor
+		//  connectionStatus
+		//  connectionColor
+		const defaultLoadFileStatus = 'Script not loaded.';
+		if (!window.backgroundStatus.handyConnected) {
+			window.backgroundStatus.connectionStatus = 'Not connected';
+			window.backgroundStatus.connectionColor = 'red';
+			window.backgroundStatus.loadFileStatus = 'Handy not connected';
+			window.backgroundStatus.loadFileColor = 'red';
+		} else {
+			window.backgroundStatus.connectionStatus = 'Connected';
+			window.backgroundStatus.connectionColor = 'green';		
+			switch( window.backgroundStatus.loadStatus ) {
+				case 0:
+					window.backgroundStatus.loadFileStatus = 'Script not loaded';
+					window.backgroundStatus.loadFileColor = 'red';
+					break;
+				case 1:
+					window.backgroundStatus.loadFileStatus = 'Uploading script to server';
+					window.backgroundStatus.loadFileColor = 'orange';
+					break;					
+				case 2:
+					window.backgroundStatus.loadFileStatus = 'Setting mode on handy';
+					window.backgroundStatus.loadFileColor = 'orange';
+					break;				
+				case 3:
+					window.backgroundStatus.loadFileStatus = 'Downloading script to handy';
+					window.backgroundStatus.loadFileColor = 'orange';
+					break;	
+				case 4:
+					window.backgroundStatus.loadFileStatus = 'Handy ready to play';
+					window.backgroundStatus.loadFileColor = 'green';
+					break;	
+				case 5:
+				    window.backgroundStatus.loadFileStatus = 'Upload script failed';
+					window.backgroundStatus.loadFileColor = 'red';
+					break;		
+				case 6:
+					window.backgroundStatus.loadFileStatus = 'Failed to set mode on handy';
+					window.backgroundStatus.loadFileColor = 'red';
+					break;					
+				case 7:
+					window.backgroundStatus.loadFileStatus = 'Failed to play script';
+					window.backgroundStatus.loadFileColor = 'red';
+					break;				
+				case 8:
+					window.backgroundStatus.loadFileStatus = 'Failed to upload script to handyfeeling.com';
+					window.backgroundStatus.loadFileColor = 'red';
+					break;	
+				case 9:
+					window.backgroundStatus.loadFileStatus = 'Failed to download script to handy';
+					window.backgroundStatus.loadFileColor = 'red';
+					break;	
+				case 10:
+					window.backgroundStatus.loadFileStatus = 'Handy firmware out of date, visit www.handyfeeling.com';
+					window.backgroundStatus.loadFileColor = 'red';
+					break;		
+			}
+		}
+		if ( window.backgroundStatus.paused ) window.backgroundStatus.connectionStatus += ' (paused)';
+		if ( window.backgroundStatus.scriptFileName == undefined || window.backgroundStatus.scriptFileName == "" ) {
+			window.backgroundStatus.scriptFileStatus = 'Select a script';
+			window.backgroundStatus.scriptFileColor = 'orange';	
+			} else {
+			if ( window.scriptFileData && window.scriptFileData != "" ) {
+				window.backgroundStatus.scriptFileStatus = 'Script ready to load';
+				window.backgroundStatus.scriptFileColor = 'green';
+			} else {
+				window.backgroundStatus.scriptFileStatus = 'Failed to load file';
+				window.backgroundStatus.scriptFileColor = 'red';		
+			}
+		}
+		window.self.updatePopup();
+	}
+
 }
 
 new Background();
